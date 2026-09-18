@@ -214,6 +214,9 @@ struct GPUDebugVertex {
 	float nz;
 };
 
+class StringWriter;
+
+// TODO: This interface is somewhat pointless. GPUCommon could be the base class.
 class GPUDebugInterface {
 public:
 	virtual ~GPUDebugInterface() = default;
@@ -236,7 +239,7 @@ public:
 	virtual void SetCmdValue(u32 op) = 0;
 	virtual void Flush() = 0;
 
-	virtual void GetStats(char *buffer, size_t bufsize) = 0;
+	virtual void GetStats(StringWriter &w) = 0;
 
 	virtual uint32_t SetAddrTranslation(uint32_t value) = 0;
 	virtual uint32_t GetAddrTranslation() = 0;

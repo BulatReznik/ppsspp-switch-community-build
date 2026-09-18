@@ -34,6 +34,12 @@
 #if PPSSPP_ARCH(LOONGARCH64)
 #if PPSSPP_ARCH(LOONGARCH64_LSX)
 #include <lsxintrin.h>
+
+static inline __m128 __lsx_vreplfr2vr_s(float val) {
+	int32_t bits;
+	memcpy(&bits, &val, sizeof(bits));
+	return (__m128)__lsx_vreplgr2vr_w(bits);
+}
 #endif
 #endif
 
@@ -63,6 +69,15 @@ static inline float32x4_t vmlaq_laneq_f32(float32x4_t a, float32x4_t b, float32x
 	case 1: return vmlaq_lane_f32(a, b, vget_low_f32(c), 1);
 	case 2: return vmlaq_lane_f32(a, b, vget_high_f32(c), 0);
 	default: return vmlaq_lane_f32(a, b, vget_high_f32(c), 1);
+	}
+}
+
+static inline float32x4_t vdupq_laneq_f32(float32x4_t vec, int lane) {
+	switch (lane & 3) {
+	case 0: return vdupq_lane_f32(vget_low_f32(vec), 0);
+	case 1: return vdupq_lane_f32(vget_low_f32(vec), 1);
+	case 2: return vdupq_lane_f32(vget_high_f32(vec), 0);
+	default: return vdupq_lane_f32(vget_high_f32(vec), 1);
 	}
 }
 

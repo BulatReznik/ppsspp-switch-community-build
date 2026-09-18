@@ -158,8 +158,8 @@ void TextureCacheCommon::StartFrame() {
 	replacementFrameBudgetSeconds_ = baseValue / fps;
 
 	if ((DebugOverlay)g_Config.iDebugOverlay == DebugOverlay::DEBUG_STATS) {
-		gpuStats.numReplacerTrackedTex = replacer_.GetNumTrackedTextures();
-		gpuStats.numCachedReplacedTextures = replacer_.GetNumCachedReplacedTextures();
+		gpuStats.perFrame.numReplacerTrackedTex = replacer_.GetNumTrackedTextures();
+		gpuStats.perFrame.numCachedReplacedTextures = replacer_.GetNumCachedReplacedTextures();
 	}
 
 	if (texelsScaledThisFrame_) {
@@ -519,8 +519,8 @@ TexCacheEntry *TextureCacheCommon::SetTexture() {
 		}
 
 		if (match) {
-			if (entry->lastFrame != gpuStats.numFlips) {
-				u32 diff = gpuStats.numFlips - entry->lastFrame;
+			if (entry->lastFrame != gpuStats.totals.numFlips) {
+				u32 diff = gpuStats.totals.numFlips - entry->lastFrame;
 				entry->numFrames++;
 
 				if (entry->framesUntilNextFullHash < diff) {
@@ -718,7 +718,7 @@ TexCacheEntry *TextureCacheCommon::SetTexture() {
 }
 
 bool TextureCacheCommon::GetBestFramebufferCandidate(const TextureDefinition &entry, u32 texAddrOffset, AttachCandidate *bestCandidate, const char *context) const {
-	gpuStats.numFramebufferEvaluations++;
+	gpuStats.perFrame.numFramebufferEvaluations++;
 
 	TinySet<AttachCandidate, 6> candidates;
 
@@ -839,7 +839,7 @@ void TextureCacheCommon::Decimate(TexCacheEntry *exceptThisOne, bool forcePressu
 			}
 			bool hasClut = (iter->second->status & TexCacheEntry::STATUS_CLUT_VARIANTS) != 0;
 			int killAge = hasClut ? TEXTURE_KILL_AGE_CLUT : killAgeBase;
-			if (iter->second->lastFrame + killAge < gpuStats.numFlips) {
+			if (iter->second->lastFrame + killAge < gpuStats.totals.numFlips) {
 				DeleteTexture(iter++);
 			} else {
 				++iter;
@@ -859,7 +859,7 @@ void TextureCacheCommon::Decimate(TexCacheEntry *exceptThisOne, bool forcePressu
 				continue;
 			}
 			// In low memory mode, we kill them all since secondary cache is disabled.
-			if (lowMemoryMode_ || iter->second->lastFrame + TEXTURE_SECOND_KILL_AGE < gpuStats.numFlips) {
+			if (lowMemoryMode_ || iter->second->lastFrame + TEXTURE_SECOND_KILL_AGE < gpuStats.totals.numFlips) {
 				ReleaseTexture(iter->second.get(), true);
 				secondCacheSizeEstimate_ -= EstimateTexMemoryUsage(iter->second.get());
 				iter = secondCache_.erase(iter);
@@ -877,7 +877,7 @@ void TextureCacheCommon::Decimate(TexCacheEntry *exceptThisOne, bool forcePressu
 
 void TextureCacheCommon::DecimateVideos() {
 	for (auto iter = videos_.begin(); iter != videos_.end(); ) {
-		if (iter->flips + VIDEO_DECIMATE_AGE < gpuStats.numFlips) {
+		if (iter->flips + VIDEO_DECIMATE_AGE < gpuStats.totals.numFlips) {
 			iter = videos_.erase(iter);
 		} else {
 			++iter;
@@ -901,7 +901,7 @@ bool TextureCacheCommon::IsVideo(u32 texaddr) const {
 void TextureCacheCommon::HandleTextureChange(TexCacheEntry *const entry, const char *reason, bool initialMatch, bool doDelete) {
 	cacheSizeEstimate_ -= EstimateTexMemoryUsage(entry);
 	entry->numInvalidated++;
-	gpuStats.numTextureInvalidations++;
+	gpuStats.perFrame.numTextureInvalidations++;
 	DEBUG_LOG(Log::G3D, "Texture different or overwritten, reloading at %08x: %s", entry->addr, reason);
 	if (doDelete) {
 		ForgetLastTexture();
@@ -964,7 +964,7 @@ void TextureCacheCommon::NotifyFramebuffer(VirtualFramebuffer *framebuffer, Fram
 		// Color - no need to look in the mirrors.
 		for (auto it = cache_.lower_bound(cacheKey), end = cache_.upper_bound(cacheKeyEnd); it != end; ++it) {
 			it->second->status |= TexCacheEntry::STATUS_FRAMEBUFFER_OVERLAP;
-			gpuStats.numTextureInvalidationsByFramebuffer++;
+			gpuStats.perFrame.numTextureInvalidationsByFramebuffer++;
 		}
 
 		if (z_stride != 0) {
@@ -974,11 +974,11 @@ void TextureCacheCommon::NotifyFramebuffer(VirtualFramebuffer *framebuffer, Fram
 			cacheKeyEnd = (u64)z_endAddr << 32;
 			for (auto it = cache_.lower_bound(cacheKey | 0x200000), end = cache_.upper_bound(cacheKeyEnd | 0x200000); it != end; ++it) {
 				it->second->status |= TexCacheEntry::STATUS_FRAMEBUFFER_OVERLAP;
-				gpuStats.numTextureInvalidationsByFramebuffer++;
+				gpuStats.perFrame.numTextureInvalidationsByFramebuffer++;
 			}
 			for (auto it = cache_.lower_bound(cacheKey | 0x600000), end = cache_.upper_bound(cacheKeyEnd | 0x600000); it != end; ++it) {
 				it->second->status |= TexCacheEntry::STATUS_FRAMEBUFFER_OVERLAP;
-				gpuStats.numTextureInvalidationsByFramebuffer++;
+				gpuStats.perFrame.numTextureInvalidationsByFramebuffer++;
 			}
 		}
 		break;
@@ -1187,7 +1187,7 @@ void TextureCacheCommon::SetTextureFramebuffer(const AttachCandidate &candidate)
 
 	framebuffer->usageFlags |= FB_USAGE_TEXTURE;
 	// Keep the framebuffer alive.
-	framebuffer->last_frame_used = gpuStats.numFlips;
+	framebuffer->last_frame_used = gpuStats.totals.numFlips;
 
 	nextFramebufferTextureChannel_ = RASTER_COLOR;
 
@@ -1331,14 +1331,6 @@ bool TextureCacheCommon::GetCurrentFramebufferTextureDebug(GPUDebugBuffer &buffe
 void TextureCacheCommon::NotifyConfigChanged() {
 	int scaleFactor = g_Config.iTexScalingLevel;
 
-	if (!gstate_c.Use(GPU_USE_TEXTURE_NPOT)) {
-		// Reduce the scale factor to a power of two (e.g. 2 or 4) if textures must be a power of two.
-		// TODO: In addition we should probably remove these options from the UI in this case.
-		while ((scaleFactor & (scaleFactor - 1)) != 0) {
-			--scaleFactor;
-		}
-	}
-
 	// Just in case, small display with auto resolution or something.
 	if (scaleFactor <= 0) {
 		scaleFactor = 1;
@@ -1351,7 +1343,7 @@ void TextureCacheCommon::NotifyConfigChanged() {
 
 void TextureCacheCommon::NotifyWriteFormattedFromMemory(u32 addr, int size, int width, GEBufferFormat fmt) {
 	addr &= 0x3FFFFFFF;
-	videos_.push_back({ addr, (u32)size, gpuStats.numFlips });
+	videos_.push_back({ addr, (u32)size, gpuStats.totals.numFlips });
 }
 
 void TextureCacheCommon::LoadClut(u32 clutAddr, u32 loadBytes, GPURecord::Recorder *recorder) {
@@ -1410,14 +1402,14 @@ void TextureCacheCommon::LoadClut(u32 clutAddr, u32 loadBytes, GPURecord::Record
 				// the framebuffer with the smallest offset. This is yet another framebuffer matching
 				// loop with its own rules, eventually we'll probably want to do something
 				// more systematic.
-				bool okAge = !PSP_CoreParameter().compat.flags().LoadCLUTFromCurrentFrameOnly || framebuffer->last_frame_render == gpuStats.numFlips;  // Here we can try heuristics.
+				bool okAge = !PSP_CoreParameter().compat.flags().LoadCLUTFromCurrentFrameOnly || framebuffer->last_frame_render == gpuStats.totals.numFlips;  // Here we can try heuristics.
 				if (matchRange && !inMargin && offset < (int)clutRenderOffset_) {
 					if (okAge) {
 						WARN_LOG_N_TIMES(clutfb, 5, Log::G3D, "Detected LoadCLUT(%d bytes) from framebuffer %08x (%s), last render %d frames ago, byte offset %d, pixel offset %d",
-							loadBytes, fb_address, GeBufferFormatToString(framebuffer->fb_format), gpuStats.numFlips - framebuffer->last_frame_render, offset, offset / fb_bpp);
-						framebuffer->last_frame_clut = gpuStats.numFlips;
+							loadBytes, fb_address, GeBufferFormatToString(framebuffer->fb_format), gpuStats.totals.numFlips - framebuffer->last_frame_render, offset, offset / fb_bpp);
+						framebuffer->last_frame_clut = gpuStats.totals.numFlips;
 						// Also mark used so it's not decimated.
-						framebuffer->last_frame_used = gpuStats.numFlips;
+						framebuffer->last_frame_used = gpuStats.totals.numFlips;
 						framebuffer->usageFlags |= FB_USAGE_CLUT;
 						bestClutAddress = framebuffer->fb_address;
 						clutRenderOffset_ = (u32)offset;
@@ -1427,7 +1419,7 @@ void TextureCacheCommon::LoadClut(u32 clutAddr, u32 loadBytes, GPURecord::Record
 							break;
 						}
 					} else {
-						WARN_LOG(Log::G3D, "Ignoring CLUT load from %d frames old buffer at %08x", gpuStats.numFlips - framebuffer->last_frame_render, fb_address);
+						WARN_LOG(Log::G3D, "Ignoring CLUT load from %d frames old buffer at %08x", gpuStats.totals.numFlips - framebuffer->last_frame_render, fb_address);
 					}
 				}
 			}
@@ -2291,13 +2283,13 @@ void TextureCacheCommon::ApplyTexture(bool doBind) {
 	if (entry->status & TexCacheEntry::STATUS_CLUT_GPU) {
 		// Special process.
 		ApplyTextureDepal(entry);
-		entry->lastFrame = gpuStats.numFlips;
+		entry->lastFrame = gpuStats.totals.numFlips;
 		gstate_c.SetTextureFullAlpha(false);
 		gstate_c.SetTextureIs3D(false);
 		gstate_c.SetTextureIsArray(false);
 		gstate_c.SetTextureIsBGRA(false);
 	} else {
-		entry->lastFrame = gpuStats.numFlips;
+		entry->lastFrame = gpuStats.totals.numFlips;
 		if (doBind) {
 			BindTexture(entry);
 		}
@@ -2507,7 +2499,7 @@ void TextureCacheCommon::ApplyTextureFramebuffer(VirtualFramebuffer *framebuffer
 
 		draw2D_->Blit(textureShader, u1, v1, u2, v2, u1, v1, u2, v2, framebuffer->renderWidth, framebuffer->renderHeight, depalWidth, framebuffer->renderHeight, false, framebuffer->renderScaleFactor);
 
-		gpuStats.numDepal++;
+		gpuStats.perFrame.numDepal++;
 
 		gstate_c.curTextureWidth = texWidth;
 		gstate_c.Dirty(DIRTY_UVSCALEOFFSET);
@@ -2609,7 +2601,7 @@ void TextureCacheCommon::ApplyTextureDepal(TexCacheEntry *entry) {
 
 	draw2D_->Blit(textureShader, u1, v1, u2, v2, u1, v1, u2, v2, texWidth, texHeight, texWidth, texHeight, false, 1);
 
-	gpuStats.numDepal++;
+	gpuStats.perFrame.numDepal++;
 
 	gstate_c.curTextureWidth = texWidth;
 	gstate_c.Dirty(DIRTY_UVSCALEOFFSET);
@@ -2806,11 +2798,11 @@ void TextureCacheCommon::Invalidate(u32 addr, int size, GPUInvalidationType type
 				entry->minihash = (entry->minihash ^ 0x89ABCDEF) + 89;
 			}
 			if (type != GPU_INVALIDATE_ALL) {
-				gpuStats.numTextureInvalidations++;
+				gpuStats.perFrame.numTextureInvalidations++;
 				// Start it over from 0 (unless it's safe.)
 				entry->numFrames = type == GPU_INVALIDATE_SAFE ? 256 : 0;
 				if (type == GPU_INVALIDATE_SAFE) {
-					u32 diff = gpuStats.numFlips - entry->lastFrame;
+					u32 diff = gpuStats.totals.numFlips - entry->lastFrame;
 					// We still need to mark if the texture is frequently changing, even if it's safely changing.
 					if (diff < TEXCACHE_FRAME_CHANGE_FREQUENT) {
 						entry->status |= TexCacheEntry::STATUS_CHANGE_FREQUENT;
@@ -2858,7 +2850,7 @@ std::string AttachCandidate::ToString() const {
 }
 
 bool TextureCacheCommon::PrepareBuildTexture(BuildTexturePlan &plan, TexCacheEntry *entry) {
-	gpuStats.numTexturesDecoded++;
+	gpuStats.perFrame.numTexturesDecoded++;
 
 	// For the estimate, we assume cluts always point to 8888 for simplicity.
 	cacheSizeEstimate_ += EstimateTexMemoryUsage(entry);

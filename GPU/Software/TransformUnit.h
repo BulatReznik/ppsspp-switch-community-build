@@ -43,10 +43,9 @@ enum class CullType {
 	OFF = 2,
 };
 
-struct ScreenCoords
-{
-	ScreenCoords() {}
-	ScreenCoords(int x, int y, u16 z) : x(x), y(y), z(z) {}
+struct ScreenCoords {
+	ScreenCoords() = default;
+	ScreenCoords(int _x, int _y, u16 _z) : x(_x), y(_y), z(_z) {}
 
 	int x;
 	int y;
@@ -54,24 +53,21 @@ struct ScreenCoords
 
 	Vec2<int> xy() const { return Vec2<int>(x, y); }
 
-	ScreenCoords operator * (const float t) const
-	{
+	ScreenCoords operator * (const float t) const {
 		return ScreenCoords((int)(x * t), (int)(y * t), (u16)(z * t));
 	}
 
-	ScreenCoords operator / (const int t) const
-	{
+	ScreenCoords operator / (const int t) const {
 		return ScreenCoords(x / t, y / t, z / t);
 	}
 
-	ScreenCoords operator + (const ScreenCoords& oth) const
-	{
+	ScreenCoords operator + (const ScreenCoords& oth) const {
 		return ScreenCoords(x + oth.x, y + oth.y, z + oth.z);
 	}
 };
 
 struct DrawingCoords {
-	DrawingCoords() {}
+	DrawingCoords() = default;
 	DrawingCoords(s16 x, s16 y) : x(x), y(y) {}
 
 	s16 x;
@@ -111,6 +107,7 @@ class VertexReader;
 
 class SoftwareDrawEngine;
 class SoftwareVertexReader;
+class StringWriter;
 
 class TransformUnit {
 public:
@@ -141,7 +138,7 @@ public:
 	void FlushIfOverlap(GPUCommon *common, const char *reason, bool modifying, uint32_t addr, uint32_t stride, uint32_t w, uint32_t h);
 	void NotifyClutUpdate(const void *src);
 
-	void GetStats(char *buffer, size_t bufsize);
+	void GetStats(StringWriter &w);
 
 	void SetDirty(SoftDirty flags);
 	SoftDirty GetDirty();
@@ -164,6 +161,8 @@ private:
 	friend SoftwareVertexReader;
 };
 
+enum class ClipInfoFlags;
+
 class SoftwareDrawEngine : public DrawEngineCommon {
 public:
 	SoftwareDrawEngine();
@@ -174,7 +173,7 @@ public:
 
 	void NotifyConfigChanged() override;
 	void Flush() override;
-	void DispatchSubmitPrim(const void *verts, const void *inds, GEPrimitiveType prim, int vertexCount, u32 vertType, bool clockwise, int *bytesRead) override;
+	void DispatchSubmitPrim(const void *verts, const void *inds, GEPrimitiveType prim, int vertexCount, u32 vertTypeID, bool clockwise, int *bytesRead, ClipInfoFlags clipInfoFlags) override;
 	void DispatchSubmitImm(GEPrimitiveType prim, TransformedVertex *buffer, int vertexCount, int cullMode, bool continuation) override;
 
 	VertexDecoder *FindVertexDecoder(u32 vtype);

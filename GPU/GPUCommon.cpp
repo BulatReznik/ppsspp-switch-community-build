@@ -55,7 +55,7 @@ GPUCommon::GPUCommon(GraphicsContext *gfxCtx, Draw::DrawContext *draw) :
 	Reinitialize();
 	gstate.Reset();
 	gstate_c.Reset();
-	gpuStats.Reset();
+	gpuStats.ResetFrame();
 
 	PPGeSetDrawContext(draw);
 	ResetMatrices();
@@ -172,7 +172,7 @@ void GPUCommon::DumpNextFrame() {
 }
 
 u32 GPUCommon::DrawSync(int mode) {
-	gpuStats.numDrawSyncs++;
+	gpuStats.perFrame.numDrawSyncs++;
 
 	if (mode < 0 || mode > 1)
 		return SCE_KERNEL_ERROR_INVALID_MODE;
@@ -222,7 +222,7 @@ void GPUCommon::CheckDrawSync() {
 }
 
 int GPUCommon::ListSync(int listid, int mode) {
-	gpuStats.numListSyncs++;
+	gpuStats.perFrame.numListSyncs++;
 
 	if (listid < 0 || listid >= DisplayListMaxCount)
 		return SCE_KERNEL_ERROR_INVALID_ID;
@@ -737,7 +737,7 @@ DLResult GPUCommon::ProcessDLQueue() {
 		}
 	}
 
-	TimeCollector collectStat(&gpuStats.msProcessingDisplayLists, coreCollectDebugStats);
+	TimeCollector collectStat(&gpuStats.perFrame.msProcessingDisplayLists, coreCollectDebugStats);
 
 	auto GetNextListIndex = [&]() -> int {
 		if (dlQueue.empty())
@@ -866,7 +866,7 @@ DLResult GPUCommon::ProcessDLQueue() {
 	currentList = nullptr;
 
 	if (coreCollectDebugStats) {
-		gpuStats.otherGPUCycles += cyclesExecuted;
+		gpuStats.perFrame.otherGPUCycles += cyclesExecuted;
 	}
 
 	drawCompleteTicks = startingTicks + cyclesExecuted;
@@ -915,7 +915,7 @@ void GPUCommon::Execute_BJump(u32 op, u32 diff) {
 	if (!currentList->bboxResult) {
 		// bounding box jump.
 		const u32 target = gstate_c.getRelativeAddress(op & 0x00FFFFFC);
-		gpuStats.numBBOXJumps++;
+		gpuStats.perFrame.numBBOXJumps++;
 		if (Memory::IsValidAddress(target)) {
 			UpdatePC(currentList->pc, target - 4);
 			currentList->pc = target - 4; // pc will be increased after we return, counteract that
@@ -1220,6 +1220,8 @@ void GPUCommon::Execute_BoundingBox(u32 op, u32 diff) {
 		inds = Memory::GetPointerUnchecked(gstate_c.indexAddr);
 	}
 
+	UpdateMatrixProducts();
+
 	// Test if the bounding box is within the drawing region.
 	// The PSP only seems to vary the result based on a single range of 0x100.
 	if (count > 0x200) {
@@ -1353,7 +1355,7 @@ void GPUCommon::FlushImm() {
 		gstate.textureMapEnable = (GE_CMD_TEXTUREMAPENABLE << 24) | (int)texturing;
 		gstate.fogEnable = (GE_CMD_FOGENABLE << 24) | (int)fog;
 		gstate.ditherEnable = (GE_CMD_DITHERENABLE << 24) | (int)dither;
-		gstate_c.Dirty(DIRTY_VERTEXSHADER_STATE | DIRTY_FRAGMENTSHADER_STATE | DIRTY_RASTER_STATE | DIRTY_VIEWPORTSCISSOR_STATE | DIRTY_UVSCALEOFFSET | DIRTY_CULLRANGE);
+		gstate_c.Dirty(DIRTY_VERTEXSHADER_STATE | DIRTY_FRAGMENTSHADER_STATE | DIRTY_RASTER_STATE | DIRTY_VIEWPORTSCISSOR_STATE | DIRTY_UVSCALEOFFSET);
 	}
 
 	drawEngineCommon_->DispatchSubmitImm(immPrim_, immBuffer_, immCount_, cullMode, immFirstSent_);
@@ -1368,7 +1370,7 @@ void GPUCommon::FlushImm() {
 		gstate.textureMapEnable = (GE_CMD_TEXTUREMAPENABLE << 24) | (int)prevTexturing;
 		gstate.fogEnable = (GE_CMD_FOGENABLE << 24) | (int)prevFog;
 		gstate.ditherEnable = (GE_CMD_DITHERENABLE << 24) | (int)prevDither;
-		gstate_c.Dirty(DIRTY_VERTEXSHADER_STATE | DIRTY_FRAGMENTSHADER_STATE | DIRTY_RASTER_STATE | DIRTY_VIEWPORTSCISSOR_STATE | DIRTY_UVSCALEOFFSET | DIRTY_CULLRANGE);
+		gstate_c.Dirty(DIRTY_VERTEXSHADER_STATE | DIRTY_FRAGMENTSHADER_STATE | DIRTY_RASTER_STATE | DIRTY_VIEWPORTSCISSOR_STATE | DIRTY_UVSCALEOFFSET);
 	}
 }
 
@@ -1398,7 +1400,7 @@ void GPUCommon::FastLoadBoneMatrix(u32 target) {
 	cyclesExecuted += 2 * 14;  // one to reset the counter, 12 to load the matrix, and a return.
 
 	if (coreCollectDebugStats) {
-		gpuStats.otherGPUCycles += 2 * 14;
+		gpuStats.perFrame.otherGPUCycles += 2 * 14;
 	}
 }
 
@@ -1455,8 +1457,8 @@ void GPUCommon::DoState(PointerWrap &p) {
 	} else if (s >= 3) {
 		// This may have been saved with or without padding, depending on platform.
 		// We need to upconvert it to our consistently-padded struct.
-		static const size_t DisplayList_v3_size = 452;
-		static const size_t DisplayList_v4_size = 456;
+		static constexpr size_t DisplayList_v3_size = 452;
+		static constexpr size_t DisplayList_v4_size = 456;
 		static_assert(DisplayList_v4_size == sizeof(DisplayList), "Make sure to change here when updating DisplayList");
 
 		p.DoVoid(&dls[0], DisplayList_v3_size);
@@ -1718,7 +1720,7 @@ void GPUCommon::DoBlockTransfer(u32 skipDrawReason) {
 	int bpp = gstate.getTransferBpp();
 
 	DEBUG_LOG(Log::G3D, "Block transfer: %08x/%x -> %08x/%x, %ix%ix%i (%i,%i)->(%i,%i)", srcBasePtr, srcStride, dstBasePtr, dstStride, width, height, bpp, srcX, srcY, dstX, dstY);
-	gpuStats.numBlockTransfers++;
+	gpuStats.perFrame.numBlockTransfers++;
 
 	// For VRAM, we wrap around when outside valid memory (mirrors still work.)
 	if ((srcBasePtr & 0x04800000) == 0x04800000)
@@ -2088,10 +2090,10 @@ GPUDebug::NotifyResult GPUCommon::NotifyCommand(u32 pc, GPUBreakpoints *breakpoi
 
 	u32 op = Memory::ReadUnchecked_U32(pc);
 	u32 cmd = op >> 24;
-	if (thisFlipNum_ != gpuStats.numFlips) {
+	if (thisFlipNum_ != gpuStats.totals.numFlips) {
 		primsLastFrame_ = primsThisFrame_;
 		primsThisFrame_ = 0;
-		thisFlipNum_ = gpuStats.numFlips;
+		thisFlipNum_ = gpuStats.totals.numFlips;
 	}
 
 	bool isPrim = false;
@@ -2187,4 +2189,80 @@ bool GPUCommon::SetRestrictPrims(std::string_view rule) {
 	} else {
 		return false;
 	}
+}
+
+void GPUCommon::UpdateMatrixProducts() {
+	// Compute any dirty product matrices.
+	if (gstate_c.IsDirty(DIRTY_VIEW_PROJ_MATRIX)) {
+		float view[4 * 4];
+		ConvertMatrix4x3To4x4(view, gstate.viewMatrix);
+		Matrix4ByMatrix4(gstate_c.viewproj, view, gstate.projMatrix);
+		gstate_c.Clean(DIRTY_VIEW_PROJ_MATRIX);
+	}
+	if (gstate_c.IsDirty(DIRTY_WORLD_VIEW_PROJ_MATRIX)) {
+		float world[4 * 4];
+		ConvertMatrix4x3To4x4(world, gstate.worldMatrix);
+		Matrix4ByMatrix4(gstate_c.worldviewproj, world, gstate_c.viewproj);
+	}
+	if (gstate_c.IsDirty(DIRTY_CULL_MATRIX)) {
+		// Modify the transform matrix to take the viewport into account before culling. This is not necessary
+		// for most games, but there are games that rely on outside-viewport draws (such as Dante's Inferno)'s post
+		// processing effects, and we don't want to cull those.
+		// Potentially we should cache this transform matrix too, but hopefully this is not a bottleneck.
+		// I guess we could also do this directly when computing worldviewproj...
+
+		const float vpXCenter = gstate.getViewportXCenter();
+		const float vpYCenter = gstate.getViewportYCenter();
+		const float vpXScale = gstate.getViewportXScale();
+		const float vpYScale = gstate.getViewportYScale();
+		const int scissorX2 = gstate.getScissorX2();
+		const int scissorY2 = gstate.getScissorY2();
+
+		// Check for weird scaling that can make graphics extend beyond the viewport.
+		// NOTE: These checks are not bullet proof.
+		if (vpXCenter != 2048.0f || vpYCenter != 2048.0f || vpXScale < ((scissorX2 + 1) >> 1) || fabsf(vpYScale) < ((scissorY2 + 1) >> 1)) {
+			// Note that the PSP does not clip against the viewport.
+			const Vec2f baseOffset = Vec2f(gstate.getOffsetX(), gstate.getOffsetY());
+			// Region1 (rate) is used as an X1/Y1 here, matching PSP behavior. ???
+			_dbg_assert_(gstate.getRegionX1() != 0x100);
+			_dbg_assert_(gstate.getRegionY1() != 0x100);
+			Vec2f minOffset = baseOffset + Vec2f(std::max(gstate.getRegionX1(), gstate.getScissorX1()), std::max(gstate.getRegionY1(), gstate.getScissorY1()));
+			Vec2f maxOffset = baseOffset + Vec2f(std::min(gstate.getRegionX2(), gstate.getScissorX2()), std::min(gstate.getRegionY2(), gstate.getScissorY2()));
+
+			// Now let's apply the viewport to our scissor/region + offset range.
+			Vec2f inverseViewportScale = Vec2f(1.0f / gstate.getViewportXScale(), 1.0f / gstate.getViewportYScale());
+			Vec2f minViewport = (minOffset - Vec2f(gstate.getViewportXCenter(), gstate.getViewportYCenter())) * inverseViewportScale;
+			Vec2f maxViewport = (maxOffset - Vec2f(gstate.getViewportXCenter(), gstate.getViewportYCenter())) * inverseViewportScale;
+
+			Vec2f viewportInvSize = Vec2f(1.0f / (maxViewport.x - minViewport.x), 1.0f / (maxViewport.y - minViewport.y));
+
+			Lin::Matrix4x4 applyViewport{};
+			// Scale to the viewport's size.
+			applyViewport.xx = 2.0f * viewportInvSize.x;
+			applyViewport.yy = 2.0f * viewportInvSize.y;
+			applyViewport.zz = 1.0f;
+			applyViewport.ww = 1.0f;
+			// And offset to the viewport's centers.
+			applyViewport.wx = -(maxViewport.x + minViewport.x) * viewportInvSize.x;
+			applyViewport.wy = -(maxViewport.y + minViewport.y) * viewportInvSize.y;
+
+			// TODO: Optimize. It's possible to scale/offset a matrix in a quicker way.
+			Matrix4ByMatrix4(gstate_c.cullMatrix, gstate_c.worldviewproj, applyViewport.m);
+		} else {
+			// No funny business, just use worldviewproj for culling.
+			memcpy(gstate_c.cullMatrix, gstate_c.worldviewproj, sizeof(float) * 16);
+		}
+
+		// Now, check the Z range. If the viewport matches the limits of Z, we can avoid the need to do near clipping in many cases
+		// since the host hardware will take care of it automatically.
+		const float absZScale = fabsf(gstate.getViewportZScale());
+		const float zCenter = gstate.getViewportZCenter();
+		const float zMin = gstate.getDepthRangeMin();
+		const float frontPlane = zCenter - absZScale;
+		if (frontPlane == zMin || frontPlane == zMin + 1.0f) {
+			gstate_c.viewportNearPlaneMatchesOutput = true;
+		}
+	}
+	// It's just a bit operation, cheaper to clean all three together.
+	gstate_c.Clean(DIRTY_WORLD_VIEW_PROJ_MATRIX | DIRTY_VIEW_PROJ_MATRIX | DIRTY_CULL_MATRIX);
 }

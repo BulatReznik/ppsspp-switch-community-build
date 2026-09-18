@@ -133,6 +133,7 @@
 #include "UI/OnScreenDisplay.h"
 #include "UI/RemoteISOScreen.h"
 #include "UI/Theme.h"
+#include "UI/PauseScreen.h"
 #include "UI/UIAtlas.h"
 
 #if PPSSPP_PLATFORM(UWP)
@@ -693,12 +694,7 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	g_BackgroundAudio.SFX().Init();
 
 	if (!boot_filename.empty() && stateToLoad.Valid()) {
-		SaveState::Load(stateToLoad, -1, [](SaveState::Status status, std::string_view message) {
-			if (!message.empty() && (!g_Config.bDumpFrames || !g_Config.bDumpVideoOutput)) {
-				g_OSD.Show(status == SaveState::Status::SUCCESS ? OSDType::MESSAGE_SUCCESS : OSDType::MESSAGE_ERROR,
-					message, status == SaveState::Status::SUCCESS ? 2.0 : 5.0);
-			}
-		});
+		SaveState::Load(stateToLoad, -1, &ShowMessageAfterSaveStateAction);
 	}
 
 	if (g_Config.bAchievementsEnable) {
@@ -1076,7 +1072,8 @@ void NativeFrame(GraphicsContext *graphicsContext) {
 	g_breakpoints.Frame();
 
 	// Apply the UIContext bounds as a 2D transformation matrix.
-	Matrix4x4 ortho = ComputeOrthoMatrix(g_display.dp_xres, g_display.dp_yres, graphicsContext->GetDrawContext()->GetDeviceCaps().coordConvention);
+	// NOTE: We compensate for the Y convention in the shaders, so we can use the same matrices in all backends.
+	Matrix4x4 ortho = ComputeOrthoMatrix(g_display.dp_xres, g_display.dp_yres, g_draw->GetDeviceCaps().coordConvention, false);
 
 	// Can be overridden by sceDisplay which may pass true for the second argument.
 	g_frameTiming.ComputePresentMode(g_draw, false);
