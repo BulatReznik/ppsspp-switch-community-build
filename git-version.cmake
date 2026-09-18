@@ -1,6 +1,6 @@
 set(GIT_VERSION_FILE "${OUTPUT_DIR}/git-version.cpp")
-# VERSION_0_6_5_FIXED_MENU_VERSION
-set(GIT_VERSION "0.6.5")
+# Keep the experimental build visibly distinct from stable v0.6.5.
+set(GIT_VERSION "0.6.5-exp21715")
 set(GIT_VERSION_UPDATE "1")
 
 find_package(Git)

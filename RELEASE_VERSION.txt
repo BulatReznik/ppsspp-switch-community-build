@@ -1,4 +1,5 @@
 PPSSPP Switch
-Version: 0.6.5
+Version: 0.6.5-exp21715
 Runtime: /switch/ppsspp/
-Baseline: PERF03 depth tiles with hardware-passed ARM64 IR/JIT fix
+Upstream: 8df41f8fb99e7dbe0aab04f9f77cb62e0eb3639f
+Baseline: v0.6.5 Switch patches plus PPSSPP PR #21715

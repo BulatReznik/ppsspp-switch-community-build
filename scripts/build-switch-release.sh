@@ -3,8 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-VERSION="0.6.5"
+VERSION="0.6.5-exp21715"
 RELEASE_NAME="PPSSPP-Switch-${VERSION}"
+UPSTREAM_COMMIT="8df41f8fb99e7dbe0aab04f9f77cb62e0eb3639f"
 
 BUILD="$ROOT/build-switch-v${VERSION}"
 FFMPEG_PREFIX="$ROOT/build-switch-ffmpeg57-prefix"
@@ -50,6 +51,11 @@ echo "Jobs:       $JOBS"
 echo
 
 cd "$ROOT"
+
+if ! git merge-base --is-ancestor "$UPSTREAM_COMMIT" HEAD; then
+  echo "ERROR: Build does not contain required upstream commit $UPSTREAM_COMMIT."
+  return 1 2>/dev/null || false
+fi
 
 echo "=== INITIALIZING SUBMODULES ==="
 git submodule sync --recursive
