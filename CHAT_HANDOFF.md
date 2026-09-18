@@ -96,6 +96,12 @@ dist/baseline-v0.6.5/PPSSPP-Switch-0.6.5.zip
 SHA-256 78ae639f28e371260f52dccb05dfd820bc81c8086457a251674e0185922c6297
 ```
 
+The experimental GitHub pre-release deliberately uses the tag
+`flatout-exp21715`, without a leading `v`. A `v0.6.5-exp21715` tag would match
+the inherited production pattern `v*.*` and unnecessarily start the complete
+Windows, UWP, Android, iOS, Linux, AppImage, source-tarball, and Docker release
+matrix. Those jobs are unrelated to the Switch NRO validation performed here.
+
 ## Rebuild on another Windows machine
 
 Install Docker Desktop, start it, clone the fork recursively, check out the
