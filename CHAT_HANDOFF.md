@@ -102,6 +102,18 @@ the inherited production pattern `v*.*` and unnecessarily start the complete
 Windows, UWP, Android, iOS, Linux, AppImage, source-tarball, and Docker release
 matrix. Those jobs are unrelated to the Switch NRO validation performed here.
 
+## Manual CI validation
+
+The manually triggered `Experimental validation` workflow passed at commit
+`f73be5e6bfc7b1ab897c7cf10e88bc4e4090e00d`:
+
+- `build (clang-normal)`
+- `build (gcc-normal)`
+- `build (android-arm64)`
+- `test-headless-alpine`, including unit and headless graphics tests
+
+Run: https://github.com/BulatReznik/ppsspp-switch-community-build/actions/runs/35340416418
+
 ## Rebuild on another Windows machine
 
 Install Docker Desktop, start it, clone the fork recursively, check out the
