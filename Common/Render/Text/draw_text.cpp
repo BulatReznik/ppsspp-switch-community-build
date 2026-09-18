@@ -37,6 +37,8 @@ static bool IsRenderDocLoaded() {
 		return true;
 	}
 	return false;
+#else
+	return false;
 #endif
 }
 
